@@ -1,36 +1,72 @@
-name: Claim Free Games
+name: Get Epic Game
 
-on: # When to run this workflow
-    push: # When you edit this repo
-
-# Uncomment the below lines to enable manual trigger.
-
-    watch:
-        types: [started] # When repo owner stars this repo
-
-    schedule:
-        - cron: "0 0 * * *" # Everyday at 00:00 UTC
+on:
+  schedule: # 删除本行开头的 # 号
+    - cron: "25 11 * * *" # 删除本行开头的 # 
+  watch:
+    types: started
+  push:
+    branches:
+      - master
+env:
+  TZ: Asia/Shanghai
 
 jobs:
-    claim:
-        runs-on: ubuntu-latest
+  MainWork:
+    runs-on: ubuntu-latest
+    steps:      
+      - name: Set Timezone to UTC+8
+        env: 
+            DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo timedatectl set-timezone "$TZ"
+          
+      - name: Clone Workflow Repository
+        uses: actions/checkout@v2
 
-        timeout-minutes: 5 # Automatically stop after 5 minutes
+      - name: Clone Claimer Repository
+        uses: actions/checkout@v2
+        with:
+          repository: lingsamuel/epicgames-freebies-claimer
+          ref: 'aa21c57d0ef19948a4f2864207173c86d5c0ffb7'
+          path: workdir
 
-        steps:
-            - name: Setup repo
-              uses: actions/checkout@v2
-              with:
-                  repository: "Revadike/epicgames-freebies-claimer"
+      # 在 'Settings' - 'Secrets' 添加 EMAIL (你的 Epic 邮箱)，PASSWD (你的 Epic 密码)，SECRET（二步验证 Secret）
+      - name: Get Gifts
+        run: |
+          cd workdir
+          npm install
+          node claimer '${{ secrets.USERNAME }} ${{ secrets.PASSWORD }} 0 ${{ secrets.SECRETKEY }}' > games.info
+      - name: Edit Games.info
+        if: always()
+        run: |
+          cd workdir
+          sed -i '1d' games.info
+          sed -i 's/Successfully claimed/成功领取/' games.info
+          sed -i 's/was already claimed for this account/已经领取/' games.info
+          sed -i '$d' games.info
+          date --rfc-3339=seconds >> ../games.info
+          cat games.info >> ../games.info
+          echo >> ../games.info
+      - name: Commit Files
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git commit -m ":package: 领取游戏"
+      # 此处的 ${{ secrets.GITHUB_TOKEN }} 是 Actions 自有变量，不用管
+      - name: GitHub Push
+        uses: ad-m/github-push-action@v0.5.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
-            - name: Setup Node.js
-              uses: actions/setup-node@v1
-
-            - name: Install dependencies
-              run: yarn
-
-            - name: Hotfix for \#4 # https://github.com/xuac/claim-epic-freebies/issues/4
-              run: mkdir .egstore
-
-            - name: Get Epic Freebies
-              run: yarn start ${{ secrets.USERNAME }} ${{ secrets.PASSWORD }} 0 ${{ secrets.SECRETKEY }}
+      # 如果需要推送到 Telegram 用来提示，取消注释以下内容
+      # 这部分的内容可以查看 https://www.github.com/appleboy/telegram-action
+      - name: Send Gift Info
+        if: always()
+        uses: appleboy/telegram-action@master
+        with:
+           to: ${{ secrets.TELEGRAM_TO }}
+           token: ${{ secrets.TELEGRAM_TOKEN }}
+           format: markdown
+           message_file: workdir/games.info
